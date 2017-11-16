@@ -25,29 +25,11 @@ def edgeb(cmd)
 end
 
 def dumptable(cmd)
-	file_name = cmd[0]
-
-	begin
-		file = File.open("/" + file_name, "w")
-
-	rescue
-		new_file = File.new("/" + file_name)
-		file = File.open("/" + file_name)
-	end
-	STDOUT.puts $routing_table
-	$routing_table.each {|key, value| 
-		file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
-	file.close
+	STDOUT.puts "DUMPTABLE: not implemented"
 end
 
 def shutdown(cmd)
-	if $server != nil
-		$server.close
-	end
-	$socketToNode.each {|key, value| key.close}
-	STDOUT.flush
-	STDERR.flush
-	exit(0)
+	STDOUT.puts "SHUTDOWN: not implemented"
 end
 
 
