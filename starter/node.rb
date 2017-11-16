@@ -6,6 +6,7 @@ $hostname = nil
 $routing_table = Hash.new() 
 $sync = Mutex.new
 $port_table = Hash.new()
+$curr_time = nil
 
 
 # --------------------- Part 1 --------------------- # 
@@ -119,6 +120,13 @@ end
 def setup(hostname, port, nodes, config)
 	$hostname = hostname
 	$port = port
+	$curr_time = Time.now
+	Thread.new {
+		loop {
+			$curr_time += 0.01
+			sleep(0.01)
+		}
+	}
 
 	#set up ports, server, buffers
 	
