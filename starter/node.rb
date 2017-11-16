@@ -24,12 +24,20 @@ def edgeb(cmd)
 	end
 end
 
+#seems like you just need to write to the file given in cmd
+#the way i set up $routing_table is the key is destination and the value is an array
+#the first entry in array is source, second is destination, third is nextHop, and fourth is distance
+#this works because each node maintains its own routing table, this also means that it doesn't have
+#the implicit self edge in the table
 def dumptable(cmd)
 	STDOUT.puts "DUMPTABLE: not implemented"
 end
 
+#i think you just need to shutdown the server, all the sockets in socketToNode
+#might have to flush STDOUT and some other things like it
 def shutdown(cmd)
 	STDOUT.puts "SHUTDOWN: not implemented"
+	exit(0)
 end
 
 
