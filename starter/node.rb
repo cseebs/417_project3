@@ -20,16 +20,34 @@ def edgeb(cmd)
 		$routing_table[dst] = [$hostname, dst, dst, 1]
 		$socketToNode[sock] = dst
 		msg = dst_ip + "," + src_ip + "," + $hostname
-		sock.write msg
+		sock.puts msg
 	end
 end
 
 def dumptable(cmd)
-	STDOUT.puts "DUMPTABLE: not implemented"
+	file_name = cmd[0]
+
+	begin
+		file = File.open("/" + file_name, "w")
+
+	rescue
+		new_file = File.new("/" + file_name)
+		file = File.open("/" + file_name)
+	end
+	STDOUT.puts $routing_table
+	$routing_table.each {|key, value| 
+		file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
+	file.close
 end
 
 def shutdown(cmd)
-	STDOUT.puts "SHUTDOWN: not ipmlemented"
+	if $server != nil
+		$server.close
+	end
+	$socketToNode.each {|key, value| key.close}
+	STDOUT.flush
+	STDERR.flush
+	exit(0)
 end
 
 
@@ -70,6 +88,16 @@ end
 
 def circuit(cmd)
 	STDOUT.puts "CIRCUIT: not implemented"
+end
+
+def receive(client)
+	message = client.gets
+	msg = message.split(",")
+	srcip = msg[0]
+	dstip = msg[1]
+	dst = msg[2]
+	dst.delete! "\n"
+	$routing_table[dst] = [$hostname, dst, dst, 1]
 end
 
 # do main loop here.... 
@@ -123,12 +151,7 @@ def setup(hostname, port, nodes, config)
 	Thread.new {
 		loop {
 			Thread.start(server.accept) do |client|
-				message = client.gets
-				msg = message.split(",")
-				srcip = msg[0]
-				dstip = msg[1]
-				dst = msg[2]
-				$routing_table[dst] = [$hostname, dst, dst, 1]
+				receive(client)
 			end
 		}
 	}
