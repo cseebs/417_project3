@@ -1,12 +1,27 @@
+require 'socket'
+require 'thread'
+
 $port = nil
 $hostname = nil
-
+$routing_table = Hash.new() 
+$sync = Mutex.new
+$port_table = Hash.new()
 
 
 # --------------------- Part 1 --------------------- # 
 
 def edgeb(cmd)
-	STDOUT.puts "EDGE: not implemented"
+	src_ip = cmd[0]
+	dst_ip = cmd[1]
+	dst = cmd[2]
+	port = $port_table[dst]
+	sock = TCPSocket.open(dst_ip, port)
+	if sock != nil
+		$routing_table[dst] = [$hostname, dst, dst, 1]
+		$socketToNode[sock] = dst
+		msg = dst_ip + "," + src_ip + "," + $hostname
+		sock.write msg
+	end
 end
 
 def dumptable(cmd)
@@ -14,8 +29,7 @@ def dumptable(cmd)
 end
 
 def shutdown(cmd)
-	STDOUT.puts "SHUTDOWN: not implemented"
-	exit(0)
+	STDOUT.puts "SHUTDOWN: not ipmlemented"
 end
 
 
@@ -58,9 +72,6 @@ def circuit(cmd)
 	STDOUT.puts "CIRCUIT: not implemented"
 end
 
-
-
-
 # do main loop here.... 
 def main()
 
@@ -72,7 +83,7 @@ def main()
 		case cmd
 		when "EDGEB"; edgeb(args)
 		when "EDGED"; edged(args)
-		when "EDGEU”; edgeU(args)
+		when "EDGEU"; edgeU(args)
 		when "DUMPTABLE"; dumptable(args)
 		when "SHUTDOWN"; shutdown(args)
 		when "STATUS"; status()
@@ -94,7 +105,33 @@ def setup(hostname, port, nodes, config)
 	#set up ports, server, buffers
 	
 	$socketToNode = {} #Hashmap to index node by socket
-	
+
+	f = File.open(nodes, "r")
+	f.each_line do |line|
+		line = line.strip()
+		msg = line.split(',')
+		node = msg[0]
+		p = msg[1]
+		$port_table[node] = p
+	end
+	f.close
+
+	#add config read later
+
+	#start a thread for accepting messages sent to this server
+	server = TCPServer.open(port)
+	Thread.new {
+		loop {
+			Thread.start(server.accept) do |client|
+				message = client.gets
+				msg = message.split(",")
+				srcip = msg[0]
+				dstip = msg[1]
+				dst = msg[2]
+				$routing_table[dst] = [$hostname, dst, dst, 1]
+			end
+		}
+	}
 
 	main()
 
