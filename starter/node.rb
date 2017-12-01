@@ -1,5 +1,7 @@
 require 'socket'
 require 'thread'
+require_relative 'message'
+require_relative 'control_message'
 
 $port = nil
 $hostname = nil
@@ -7,6 +9,14 @@ $routing_table = Hash.new()
 $sync = Mutex.new
 $port_table = Hash.new()
 $curr_time = nil
+$update_interval = nil
+$mtu = nil
+$timeout = nil
+$curr_seq = nil
+$flood_table = Hash.new()
+$buffer = []
+$seq_num = 1
+
 
 
 # --------------------- Part 1 --------------------- # 
@@ -19,52 +29,61 @@ def edgeb(cmd)
 	sock = TCPSocket.open(dst_ip, port)
 	if sock != nil
 		$routing_table[dst] = [$hostname, dst, dst, 1]
-		$socketToNode[sock] = dst
-		msg = dst_ip + "," + src_ip + "," + $hostname
-		sock.puts msg
+		$socketToNode[dst] = sock
+		msg = Message.new
+		msg.setField("type", 0)
+		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
+		Ctrl.sendMsg(msg, sock)
 	end
 end
 
-#seems like you just need to write to the file given in cmd
-#the way i set up $routing_table is the key is destination and the value is an array
-#the first entry in array is source, second is destination, third is nextHop, and fourth is distance
-#this works because each node maintains its own routing table, this also means that it doesn't have
-#the implicit self edge in the table
 def dumptable(cmd)
-  filename = cmd[0]
-  open(filename, 'w') { |f|
-    $routing_table.each do |dst, info|
-      f.puts "#{info[0]},#{info[1]},#{info[2]},#{info[3]}"
-    end
-  }
+	file_name = cmd[0]
+
+	begin
+		file = File.open(file_name, "w")
+
+	rescue
+		new_file = File.new(file_name)
+		file = File.open(file_name)
+	end
+	$routing_table.each {|key, value| 
+		file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
+	file.close
 end
 
-#i think you just need to shutdown the server, all the sockets in socketToNode
-#might have to flush STDOUT and some other things like it
 def shutdown(cmd)
-  $socketToNode.keys.each { |sock|
-    sock.flush
-    sock.close
-  }
-  
-  STDOUT.flush
-  STDERR.flush
-  exit(0)
+	if $server != nil
+		$server.close
+	end
+	$socketToNode.each {|key, value| value.close}
+	STDOUT.flush
+	STDERR.flush
+	exit(0)
 end
 
 
-
+#add a table that keeps track of every node you have received a flooded
+#packet from and the highest seq number from that node
 # --------------------- Part 2 --------------------- # 
 def edged(cmd)
-	STDOUT.puts "EDGED: not implemented"
+	dst = cmd[0]
+	$routing_table.delete(dst)
+	sock = $socketToNode[dst]
+	sock.close()
+	$socketToNode.delete(dst)
 end
 
 def edgeu(cmd)
-	STDOUT.puts "EDGEu: not implemented"
+	dst = cmd[0]
+	cost = cmd[1]
+	curr_path = $routing_table[dst]
+	next_dst = curr_path[2]
+	$routing_table[dst] = [$hostname, dst, next_dst, cost]
 end
 
 def status()
-	STDOUT.puts "STATUS: not implemented"
+	STDOUT.puts "SENDMSG: not implemented"
 end
 
 
@@ -92,16 +111,6 @@ def circuit(cmd)
 	STDOUT.puts "CIRCUIT: not implemented"
 end
 
-def receive(client)
-	message = client.gets
-	msg = message.split(",")
-	srcip = msg[0]
-	dstip = msg[1]
-	dst = msg[2]
-	dst.delete! "\n"
-	$routing_table[dst] = [$hostname, dst, dst, 1]
-end
-
 # do main loop here.... 
 def main()
 
@@ -113,7 +122,7 @@ def main()
 		case cmd
 		when "EDGEB"; edgeb(args)
 		when "EDGED"; edged(args)
-		when "EDGEU"; edgeU(args)
+		when "EDGEU"; edgeu(args)
 		when "DUMPTABLE"; dumptable(args)
 		when "SHUTDOWN"; shutdown(args)
 		when "STATUS"; status()
@@ -132,16 +141,22 @@ def setup(hostname, port, nodes, config)
 	$hostname = hostname
 	$port = port
 	$curr_time = Time.now
+	$flood_timer = 0
 	Thread.new {
 		loop {
 			$curr_time += 0.01
+			$flood_timer +=0.01
+			if ($flood_timer >= $update_interval)
+				$flood_timer = 0
+				Ctrl.flood()
+			end
 			sleep(0.01)
 		}
 	}
 
 	#set up ports, server, buffers
 	
-	$socketToNode = {} #Hashmap to index node by socket
+	$socketToNode = {} #Hashmap to index socket by node
 
 	f = File.open(nodes, "r")
 	f.each_line do |line|
@@ -153,14 +168,27 @@ def setup(hostname, port, nodes, config)
 	end
 	f.close
 
-	#add config read later
+	f = File.open(config, "r")
+	f.each_line do |line|
+		line = line.strip()
+		msg = line.split("=")
+		if (msg[0] == "updateInterval")
+			$update_interval = Integer(msg[1])
+		elsif (msg[0] == "maxPayload")
+			$mtu = Integer(msg[1])
+		elsif (msg[0] == "pingTimeout")
+			$timeout = Integer(msg[1])
+		end
+	end
+	f.close
+
 
 	#start a thread for accepting messages sent to this server
 	server = TCPServer.open(port)
 	Thread.new {
 		loop {
 			Thread.start(server.accept) do |client|
-				receive(client)
+				Ctrl.receive(client)
 			end
 		}
 	}
