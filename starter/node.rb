@@ -53,13 +53,16 @@ def dumptable(cmd)
 end
 
 def shutdown(cmd)
-	if $server != nil
-		$server.close
-	end
-	$socketToNode.each {|key, value| value.close}
-	STDOUT.flush
-	STDERR.flush
-	exit(0)
+   if $server != nil
+	$server.close
+   end
+   $socketToNode.keys.each { |sock|
+     	sock.flush
+    	sock.close
+   }
+   STDOUT.flush
+   STDERR.flush
+   exit(0)
 end
 
 
