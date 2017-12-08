@@ -7,7 +7,6 @@ class Message
 			@header = ((0).chr) * HEADER_LENGTH
 			@payload = ""
 		else 
-			@msg = msg
 			@header = msg[0..(HEADER_LENGTH - 1)]
 			@payload = msg[HEADER_LENGTH..(msg.length - 1)]
 		end
@@ -23,25 +22,25 @@ class Message
 
 	def setField(name, n) 
 		if (name == "type")
-			@header[0] = n.chr 
+			@header[0..0] = n.chr 
 		elsif (name == "frag_num")
-			@header[1] = n.chr
+			@header[1..1] = n.chr
 		elsif (name == "frag_seq")
-			@header[2] = n.chr
+			@header[2..2] = n.chr
 		elsif (name == "seq_num")
-			@header[3] = n.chr
+			@header[3..3] = n.chr
 		end
 	end
 
 	def getField(name)
 		if (name == "type")
-			return @header[0]
+			return @header[0..0].ord
 		elsif (name == "frag_num")
-			return @header[1]
+			return @header[1..1].ord
 		elsif (name =="frag_seq")
-			return @header[2]
+			return @header[2..2].ord
 		elsif (name == "seq_num")
-			return @header[3]
+			return @header[3..3].ord
 		end
 	end
 
@@ -80,5 +79,9 @@ class Message
 			end
 		end
 		return packet_list
+	end
+
+	def toString()
+		return @header + @payload
 	end
 end
