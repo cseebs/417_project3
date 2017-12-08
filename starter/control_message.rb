@@ -29,7 +29,6 @@ module Ctrl
 				end
 			}
 		end
-		#implement handling fragmentation later 
 	end
 
 	def Ctrl.handle(msg, client)
@@ -42,11 +41,10 @@ module Ctrl
 	end
 
 	def Ctrl.edgeb(message, client)
-		msg = message.split(",")
+		msg = message.getPayload().split(",")
 		srcip = msg[0]
 		dstip = msg[1]
 		dst = msg[2]
-		dst.delete! "\n"
 		$routing_table[dst] = [$hostname, dst, dst, 1]
 		$socketToNode[dst] = client
 	end
@@ -64,7 +62,7 @@ module Ctrl
 			end
 			msg.setPayload(message)
 			$socketToNode.each do |key, value|
-				Ctr.sendMsg(msg, value)
+				Ctrl.sendMsg(msg, value)
 			end
 		end
 	end
@@ -72,30 +70,26 @@ module Ctrl
 	def Ctrl.handleFlood(msg, client)
 		num = msg.getField("seq_num")
 		payload_list = msg.getPayload.split(" ")
-		if (num > $flood_table[payload_list[0]])
-			$flood_table[payload_list[0]] = num
+		curr_node = payload_list[0]
+		if ($flood_table[curr_node] == nil or 
+			num > $flood_table[curr_node])
+
+			$flood_table[curr_node] = num
 			$socketToNode.each do |key, value|
-				Ctr.sendMsg(msg, value)
+				Ctrl.sendMsg(msg, value)
 			end
 			dist_table = Hash.new()
 			for index in 1..(payload_list.length - 1)
-				neighbor = payload_list[index].split(",")
+				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
 			end
 
 			visited = []
 
-			while (visited.length < $routing_table.length)
-				curr_dist = "INF"
-				curr_node = nil
-				$routing_table.each do |key, value|
-					if (value[3] < curr_dist && !(visited.include? key))
-						curr_dist = value[3]
-						curr_node = key
-					end
-				end
-				visited << curr_node
+			while (visited.length < dist_table.length)
 				dist_table.each do |key, value|
+					temp = $routing_table[curr_node]
+					curr_dist = temp[3]
 					new_dist = curr_dist + value
 					neighbor = $routing_table[key]
 					if (new_dist < neighbor[3])
@@ -116,7 +110,7 @@ module Ctrl
 	def Ctrl.sendMsg(msg, client)
 		list = msg.fragment()
 		list.each do |packet|
-			client.puts packet.to_s
+			client.puts msg.toString()
 		end
 	end
 end
