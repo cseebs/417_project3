@@ -34,7 +34,6 @@ module Ctrl
 
 	def Ctrl.handle(msg, client)
 		type = msg.getField("type")
-		STDOUT.puts(type)
 		if (type == 0) 
 			Ctrl.edgeb(msg, client)
 		else
@@ -47,8 +46,12 @@ module Ctrl
 		srcip = msg[0]
 		dstip = msg[1]
 		dst = msg[2]
+		dst.delete! ("\n")
 		$routing_table[dst] = [$hostname, dst, dst, 1]
+		$dist_table[dst] = 1
 		$socketToNode[client] = dst
+		$neighbors[dst] = 1
+		$hop_table[dst] = dst
 	end
 
 	def Ctrl.flood()
@@ -57,9 +60,9 @@ module Ctrl
 		msg.setField("type", 1)
 		$seq_num = $seq_num + 1
 		message = $hostname + "\t"
-		if ($routing_table.length > 0)
-			$routing_table.each do |key, value|
-				dist = value[3]
+		if ($neighbors.length > 0)
+			$neighbors.each do |key, value|
+				dist = value
 				message += key + "," + dist.to_s + "\t"
 			end
 			msg.setPayload(message)
@@ -70,50 +73,83 @@ module Ctrl
 	end
 
 	def Ctrl.handleFlood(msg, client)
-		STDOUT.puts("here")
 		num = msg.getField("seq_num")
 		payload_list = msg.getPayload.split("\t")
 		curr_node = payload_list[0]
-		if ($flood_table[curr_node] == nil or 
-			num > $flood_table[curr_node])
 
-			$flood_table[curr_node] = num
-			$socketToNode.each do |key, value|
-				Ctrl.sendMsg(msg, key)
-			end
+		if (curr_node != $hostname && ($flood_table[curr_node] == nil or 
+			num > $flood_table[curr_node]["seq_num"]))
+
+			STDOUT.puts(curr_node)
 			dist_table = Hash.new()
 			for index in 1..(payload_list.length - 1)
 				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
+				if (neighbor[0] == $hostname)
+					$dist_table[curr_node] = neighbor[1]
+					$hop_table[curr_node] = curr_node
+				else 
+					$dist_table[neighbor[0]] = neighbor[1]
+					$hop_table[neighbor[0]] = curr_node
+				end
 			end
 
-			visited = []
+			$flood_table[curr_node] = {"seq_num" => num, 
+				"neighbors" => dist_table}
 
-			while (visited.length < dist_table.length)
-				dist_table.each do |key, value|
-					temp = $routing_table[curr_node]
-					curr_dist = temp[3]
-					new_dist = curr_dist + value
-					neighbor = $routing_table[key]
-					if (new_dist < neighbor[3])
-						if (curr_node != $hostname)
-							next_hop = $routing_table[curr_node]
-							$routing_table[key] = [neighbor[0], neighbor[1], 
-								next_hop[2], new_dist]
-						else 
-							$routing_table[key] = [neighbor[0], neighbor[1],
-								neighbor[2], new_dist]
-						end
+			#Ctrl.dijkstra()	
+		end
+	end
+
+	def Ctrl.sendMsg(msg, client)
+		list = msg.fragment()
+		list.each do |packet|
+			client.puts msg.toString()
+		#	$write_buffers[client] = packet
+		end
+	end
+
+	def Ctrl.dijkstra()
+		$dist_table.each do |curr, dist|
+			if (curr != $hostname)
+				$dist_table[curr] = 10000 #might need to come up with better system
+			end
+		end
+
+		visited = []
+
+		while visited.length < $flood_table.length
+			curr = Ctrl.minDist(visited)
+			visited << curr
+			dist_to_curr = $dist_table[curr]
+			neighbors = $flood_table[curr]["neighbors"]
+			neighbors.each do |neighbor, dist|
+				new_dist = dist_to_curr + dist
+				if (new_dist < $dist_table[neighbor])
+					$dist_table[neighbor] = new_dist
+					if curr != $hostname
+						temp = $routing_table[neighbor]
+						routing_table[neighbor] = [temp[0], temp[1], 
+							curr, new_dist]
+					else
+						temp = $routing_table[neighbor]
+						routing_table[neighbor] = [temp[0], temp[1],
+							temp[2], new_dist]
 					end
 				end
 			end
 		end
 	end
 
-	def Ctrl.sendMsg(msg, client)
-		#list = msg.fragment()
-		#list.each do |packet|
-			client.puts msg.toString()
-		#end
+	def Ctrl.minDist(visited)
+		min = "INF"
+		min_node = nil
+		$dist_table.each do |curr, dist|
+			if (dist < min && !(visited.include? curr))
+				min = dist
+				min_node = curr
+			end
+		end
+		return min_node
 	end
 end
