@@ -16,11 +16,13 @@ $curr_seq = nil
 $flood_table = Hash.new()
 $buffer = []
 $seq_num = 1
-$neighbors = Hash.new()
+$neighbors_dist = Hash.new()
 $dist_table = Hash.new()
 $hop_table = Hash.new()
 $write_buffers = Hash.new()
 $flood = false
+$neighbors = []
+
 
 
 
@@ -41,7 +43,8 @@ def edgeb(cmd)
 		msg.setField("type", 0)
 		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
 		Ctrl.sendMsg(msg, sock)
-		$neighbors[dst] = 1
+		$neighbors_dist[dst] = 1
+		$neighbors.push(dst)
 	end
 end
 
@@ -95,13 +98,14 @@ def edgeu(cmd)
 	next_dst = curr_path[2]
 	$routing_table[dst] = [$hostname, dst, next_dst, cost]
 	$dist_table[dst] = cost
-	$neighbors[dst] = cost
+	$neighbors_dist[dst] = cost
 end
 
 def status()
   	STDOUT.puts "Name: #{$hostname}\nPort: #{$port}\nNeighbors: "
+  	$neighbors.sort!
   	$neighbors.each_with_index do | value, index |
-    	if index == neighbors.length - 1
+    	if index == $neighbors.length - 1
      	 STDOUT.puts " #{value}\n"
    	 	else
       	STDOUT.puts " #{value},"
