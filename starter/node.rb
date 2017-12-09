@@ -16,7 +16,11 @@ $curr_seq = nil
 $flood_table = Hash.new()
 $buffer = []
 $seq_num = 1
-$neighbors = []
+$neighbors = Hash.new()
+$dist_table = Hash.new()
+$hop_table = Hash.new()
+$write_buffers = Hash.new()
+$flood = false
 
 
 
@@ -30,12 +34,14 @@ def edgeb(cmd)
 	sock = TCPSocket.open(dst_ip, port)
 	if sock != nil
 		$routing_table[dst] = [$hostname, dst, dst, 1]
+		$dist_table[dst] = 1
+		$hop_table[dst] = dst
 		$socketToNode[sock] = dst
 		msg = Message.new
 		msg.setField("type", 0)
 		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
 		Ctrl.sendMsg(msg, sock)
-		$neighbors.push(dst)
+		$neighbors[dst] = 1
 	end
 end
 
@@ -49,8 +55,8 @@ def dumptable(cmd)
 		new_file = File.new(file_name)
 		file = File.open(file_name)
 	end
-	$routing_table.each {|key, value| 
-		file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
+	$dist_table.each {|key, value| 
+		file.write("#{$hostname},#{key},#{$hop_table[key]},#{value}\n")}
 	file.close
 end
 
@@ -74,6 +80,9 @@ end
 def edged(cmd)
 	dst = cmd[0]
 	$routing_table.delete(dst)
+	$dist_table[dst] = "INF"
+	$neighbors.delete(dst)
+	$hop_table.delete(dst)
 	sock = $socketToNode.key(dst)
 	sock.close()
 	$socketToNode.delete(sock)
@@ -85,6 +94,8 @@ def edgeu(cmd)
 	curr_path = $routing_table[dst]
 	next_dst = curr_path[2]
 	$routing_table[dst] = [$hostname, dst, next_dst, cost]
+	$dist_table[dst] = cost
+	$neighbors[dst] = cost
 end
 
 def status()
@@ -160,7 +171,12 @@ def setup(hostname, port, nodes, config)
 			$flood_timer +=0.01
 			if ($flood_timer >= $update_interval)
 				$flood_timer = 0
-				Ctrl.flood()
+				$flood = true 
+				Thread.new {
+					$sync.synchronize {
+						Ctrl.flood()	
+					}
+				}
 			end
 			sleep(0.01)
 		}
@@ -198,11 +214,54 @@ def setup(hostname, port, nodes, config)
 	#start a thread for accepting messages sent to this server
 	server = TCPServer.open(port)
 	Thread.new {
-		client = server.accept
 		loop {
-			Ctrl.receive(client)
+			client = server.accept 
+			$socketToNode[client] = nil
 		}
 	}
+
+	Thread.new {
+		loop {
+			read = IO.select($socketToNode.keys,nil,nil,1)
+
+			if(read)
+				read[0].each do |sock|
+					Ctrl.receive(sock)
+				end
+			end
+		}
+	}
+	
+#	Thread.new {
+#		loop {
+#			$write_buffers.each do |key, value|
+#				if (value != "")
+#					key.puts(value.toString())
+#					$write_buffers[key] = ""
+#				end
+#			end
+#
+#			if ($flood == true)
+#				STDOUT.puts("here")
+#				$flood = false
+#				msg = Message.new
+#				msg.setField("seq_num", $seq_num)
+#				msg.setField("type", 1)
+#				$seq_num = $seq_num + 1
+#				message = $hostname + "\t"
+#				if ($neighbors.length > 0)
+#					$neighbors.each do |key, value|
+#						dist = value
+#						message += key + "," + dist.to_s + "\t"
+#					end
+#					msg.setPayload(message)
+#					$socketToNode.each do |key, value|
+#						key.puts(msg.toString())
+#					end
+#				end
+#			end
+#		}
+#	}
 
 	main()
 
