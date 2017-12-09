@@ -23,44 +23,43 @@ $neighbors = []
 # --------------------- Part 1 --------------------- # 
 
 def edgeb(cmd)
-  src_ip = cmd[0]
-  dst_ip = cmd[1]
-  dst = cmd[2]
-  port = $port_table[dst]
-  sock = TCPSocket.open(dst_ip, port)
-  if sock != nil
-    $routing_table[dst] = [$hostname, dst, dst, 1]
-    $socketToNode[dst] = sock
-    msg = Message.new
-    msg.setField("type", 0)
-    msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
-    Ctrl.sendMsg(msg, sock)
-    neighbors.push(dst)
-  end
+	src_ip = cmd[0]
+	dst_ip = cmd[1]
+	dst = cmd[2]
+	port = $port_table[dst]
+	sock = TCPSocket.open(dst_ip, port)
+	if sock != nil
+		$routing_table[dst] = [$hostname, dst, dst, 1]
+		$socketToNode[sock] = dst
+		msg = Message.new
+		msg.setField("type", 0)
+		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
+		Ctrl.sendMsg(msg, sock)
+		$neighbors.push(dst)
+	end
 end
 
 def dumptable(cmd)
-  file_name = cmd[0]
+	file_name = cmd[0]
 
-  begin
-    file = File.open(file_name, "w")
+	begin
+		file = File.open(file_name, "w")
 
-  rescue
-    new_file = File.new(file_name)
-    file = File.open(file_name)
-  end
-
-  $routing_table.each {|key, value| 
-    file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
-  file.close
+	rescue
+		new_file = File.new(file_name)
+		file = File.open(file_name)
+	end
+	$routing_table.each {|key, value| 
+		file.write("#{value[0]},#{value[1]},#{value[2]},#{value[3]}\n")}
+	file.close
 end
 
 def shutdown(cmd)
   if $server != nil
     $server.close
   end
-  $socketToNode.values.each { |sock|
-    sock.flush
+  $socketToNode.keys.each { |sock|
+  	sock.flush
     sock.close
   }
   STDOUT.flush
@@ -75,9 +74,9 @@ end
 def edged(cmd)
 	dst = cmd[0]
 	$routing_table.delete(dst)
-	sock = $socketToNode[dst]
+	sock = $socketToNode.key(dst)
 	sock.close()
-	$socketToNode.delete(dst)
+	$socketToNode.delete(sock)
 end
 
 def edgeu(cmd)
@@ -89,12 +88,14 @@ def edgeu(cmd)
 end
 
 def status()
-  STDOUT.puts "Name: #{$hostname}\nPort: #{$port}\nNeighbors: "
-  neighbors.each_with_index do | value, index |
-    if index == neighbors.length - 1
-      STDOUT.puts " #{value}\n"
-    else
-      STDOUT.puts " #{value},"
+  	STDOUT.puts "Name: #{$hostname}\nPort: #{$port}\nNeighbors: "
+  	$neighbors.each_with_index do | value, index |
+    	if index == neighbors.length - 1
+     	 STDOUT.puts " #{value}\n"
+   	 	else
+      	STDOUT.puts " #{value},"
+  		end
+	end
 end
 
 
