@@ -1,4 +1,4 @@
-rrequire_relative 'message'
+require_relative 'message'
 
 module Ctrl
 
