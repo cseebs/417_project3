@@ -111,6 +111,8 @@ module Ctrl
 	end
 
 	def Ctrl.dijkstra()
+		$flood_table[$hostname]["neighbors"] = $neighbors_dist
+		$dist_table[$hostname] = 0
 		$dist_table.each do |curr, dist|
 			if (curr != $hostname)
 				$dist_table[curr] = 10000 #might need to come up with better system
@@ -129,13 +131,9 @@ module Ctrl
 				if (new_dist < $dist_table[neighbor])
 					$dist_table[neighbor] = new_dist
 					if curr != $hostname
-						temp = $routing_table[neighbor]
-						routing_table[neighbor] = [temp[0], temp[1], 
-							curr, new_dist]
-					else
-						temp = $routing_table[neighbor]
-						routing_table[neighbor] = [temp[0], temp[1],
-							temp[2], new_dist]
+						$hop_table[neighbor] = curr
+					else 
+						$hop_table[neighbor] = neighbor
 					end
 				end
 			end
