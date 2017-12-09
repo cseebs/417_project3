@@ -198,10 +198,9 @@ def setup(hostname, port, nodes, config)
 	#start a thread for accepting messages sent to this server
 	server = TCPServer.open(port)
 	Thread.new {
+		client = server.accept
 		loop {
-			Thread.start(server.accept) do |client|
-				Ctrl.receive(client)
-			end
+			Ctrl.receive(client)
 		}
 	}
 
