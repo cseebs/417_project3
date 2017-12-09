@@ -5,10 +5,10 @@ module Ctrl
 	#receives the message from the client
 	def Ctrl.receive(client)
 		message = client.gets
+		client.flush
 		if (message.length >= Message::HEADER_LENGTH + 1)
 			$sync.synchronize {
 				msg = Message.new(message.chop)
-				STDOUT.puts(msg.toString())
 				seq = msg.getField("frag_seq")
 				num = msg.getField("frag_num")
 				if (seq == 0) 
@@ -54,7 +54,8 @@ module Ctrl
 	def Ctrl.flood()
 		msg = Message.new
 		msg.setField("seq_num", $seq_num)
-		$seq_num += 1
+		msg.setField("type", 1)
+		$seq_num = $seq_num + 1
 		message = $hostname + "\t"
 		if ($routing_table.length > 0)
 			$routing_table.each do |key, value|
@@ -69,7 +70,7 @@ module Ctrl
 	end
 
 	def Ctrl.handleFlood(msg, client)
-		STDOUT.puts("Here")
+		STDOUT.puts("here")
 		num = msg.getField("seq_num")
 		payload_list = msg.getPayload.split("\t")
 		curr_node = payload_list[0]
@@ -112,8 +113,7 @@ module Ctrl
 	def Ctrl.sendMsg(msg, client)
 		#list = msg.fragment()
 		#list.each do |packet|
-			STDOUT.puts(msg.toString())
 			client.puts msg.toString()
 		#end
 	end
-end	
+end
