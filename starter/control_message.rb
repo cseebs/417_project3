@@ -1,4 +1,4 @@
-require_relative 'message'
+rrequire_relative 'message'
 
 module Ctrl
 
@@ -50,8 +50,9 @@ module Ctrl
 		$routing_table[dst] = [$hostname, dst, dst, 1]
 		$dist_table[dst] = 1
 		$socketToNode[client] = dst
-		$neighbors[dst] = 1
+		$neighbors_dist[dst] = 1
 		$hop_table[dst] = dst
+		$neighbors.push(dst)
 	end
 
 	def Ctrl.flood()
@@ -60,8 +61,8 @@ module Ctrl
 		msg.setField("type", 1)
 		$seq_num = $seq_num + 1
 		message = $hostname + "\t"
-		if ($neighbors.length > 0)
-			$neighbors.each do |key, value|
+		if ($neighbors_dist.length > 0)
+			$neighbors_dist.each do |key, value|
 				dist = value
 				message += key + "," + dist.to_s + "\t"
 			end
@@ -80,7 +81,7 @@ module Ctrl
 		if (curr_node != $hostname && ($flood_table[curr_node] == nil or 
 			num > $flood_table[curr_node]["seq_num"]))
 
-			STDOUT.puts(curr_node)
+			#STDOUT.puts(curr_node)
 			dist_table = Hash.new()
 			for index in 1..(payload_list.length - 1)
 				neighbor = payload_list[index].split(",") 
