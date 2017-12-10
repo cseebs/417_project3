@@ -11,6 +11,7 @@ module Ctrl
 				msg = Message.new(message.chop)
 				seq = msg.getField("frag_seq")
 				num = msg.getField("frag_num")
+
 				if (seq == 0) 
 					Ctrl.handle(msg, client)
 				else 
@@ -89,14 +90,20 @@ module Ctrl
 			for index in 1..(payload_list.length - 1)
 				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
-				if (neighbor[0] == $hostname)
-					$dist_table[curr_node] = neighbor[1].to_i
-					$hop_table[curr_node] = curr_node
-				else 
-					$dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
-					$hop_table[neighbor[0]] = curr_node
-				end
+                         if ((neighbor[0] != $hostname) && (($dist_table[neighbor[0]] == nil) || ($dist_table[curr_node] + neighbor[1].to_i < $dist_table[neighbor[0]])))
+                            $dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
+                            $hop_table[neighbor[0]] = curr_node
+                          end
+			#	if (neighbor[0] == $hostname)
+			#		$dist_table[curr_node] = neighbor[1].to_i
+			#		$hop_table[curr_node] = curr_node
+			#	else 
+			#		$dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
+			#		$hop_table[neighbor[0]] = curr_node
+			#	end
 			end
+
+			$flood_packets[client] = msg
 
 			$flood_table[curr_node] = {"seq_num" => num, 
 				"neighbors" => dist_table}
@@ -113,39 +120,42 @@ module Ctrl
 
 	def Ctrl.dijkstra()
 		$flood_table[$hostname]["neighbors"] = $neighbors_dist
-		$dist_table[$hostname] = 0
-		$dist_table.each do |curr, dist|
-                        STDOUT.puts(curr)
+                temp_table = Hash.new()
+                temp_table[$hostname] = 0
+                temp_hop = Hash.new()
+		$dist_table.keys.each do |curr|
 			if (curr != $hostname)
-				$dist_table[curr] = 10000 #might need to come up with better system
+				temp_table[curr] = "INF"
 			end
 		end
 
 		visited = []
 
 		while visited.length < $flood_table.length
-			curr = Ctrl.minDist(visited)
+			curr = Ctrl.minDist(visited, temp_table)
 			visited << curr
-			dist_to_curr = $dist_table[curr]
+			dist_to_curr = temp_table[curr]
 			neighbors = $flood_table[curr]["neighbors"]
 			neighbors.each do |neighbor, dist|
 				new_dist = dist_to_curr + dist
-				if (new_dist < $dist_table[neighbor])
-					$dist_table[neighbor] = new_dist
+				if (new_dist < temp_table[neighbor])
+					temp_table[neighbor] = new_dist
 					if curr != $hostname
-						$hop_table[neighbor] = curr
+						temp_hop[neighbor] = curr
 					else 
-						$hop_table[neighbor] = neighbor
+						temp_hop[neighbor] = neighbor
 					end
 				end
 			end
 		end
+          $dist_table = temp_table
+          $hop_table = temp_hop
 	end
 
-	def Ctrl.minDist(visited)
+	def Ctrl.minDist(visited, temp_table)
 		min = "INF"
 		min_node = nil
-		$dist_table.each do |curr, dist|
+		temp_table.each do |curr, dist|
 			if (dist < min && !(visited.include? curr))
 				min = dist
 				min_node = curr
