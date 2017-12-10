@@ -169,11 +169,14 @@ def setup(hostname, port, nodes, config)
 	$port = port
 	$curr_time = Time.now
 	$flood_timer = 0
+        flood_interval = 0.5
+        $update_timer = 0
 	Thread.new {
 		loop {
 			$curr_time += 0.01
 			$flood_timer +=0.01
-			if ($flood_timer >= $update_interval)
+                        $update_timer += 0.01
+			if ($flood_timer >= flood_interval)
 				$flood_timer = 0
 				$flood = true 
 				Thread.new {
@@ -185,7 +188,15 @@ def setup(hostname, port, nodes, config)
 			sleep(0.01)
 		}
 	}
-
+        
+        Thread.new {
+           loop {
+              if ($update_timer >= flood_interval)
+                 $update_timer = 0
+                 Ctrl.dijkstra()
+              end
+           }
+        }
 	#set up ports, server, buffers
 	
 	$socketToNode = {} #Hashmap to index socket by node

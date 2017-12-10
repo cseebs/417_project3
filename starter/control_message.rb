@@ -34,6 +34,7 @@ module Ctrl
 
 	def Ctrl.handle(msg, client)
 		type = msg.getField("type")
+          #STDOUT.puts "\n#{msg.getPayload()}\ntype: #{type}"
 		if (type == 0) 
 			Ctrl.edgeb(msg, client)
 		else
@@ -46,13 +47,15 @@ module Ctrl
 		srcip = msg[0]
 		dstip = msg[1]
 		dst = msg[2]
-		dst.delete! ("\n")
-		$routing_table[dst] = [$hostname, dst, dst, 1]
-		$dist_table[dst] = 1
-		$socketToNode[client] = dst
-		$neighbors_dist[dst] = 1
-		$hop_table[dst] = dst
-		$neighbors.push(dst)
+                if ($port_table.has_key? dst)
+                  dst.delete! ("\n")
+                  $routing_table[dst] = [$hostname, dst, dst, 1]
+                  $dist_table[dst] = 1
+                  $socketToNode[client] = dst
+                  $neighbors_dist[dst] = 1
+                  $hop_table[dst] = dst
+                  $neighbors.push(dst)
+                end 
 	end
 
 	def Ctrl.flood()
@@ -87,18 +90,16 @@ module Ctrl
 				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
 				if (neighbor[0] == $hostname)
-					$dist_table[curr_node] = neighbor[1]
+					$dist_table[curr_node] = neighbor[1].to_i
 					$hop_table[curr_node] = curr_node
 				else 
-					$dist_table[neighbor[0]] = neighbor[1]
+					$dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
 					$hop_table[neighbor[0]] = curr_node
 				end
 			end
 
 			$flood_table[curr_node] = {"seq_num" => num, 
 				"neighbors" => dist_table}
-
-			#Ctrl.dijkstra()	
 		end
 	end
 
@@ -114,6 +115,7 @@ module Ctrl
 		$flood_table[$hostname]["neighbors"] = $neighbors_dist
 		$dist_table[$hostname] = 0
 		$dist_table.each do |curr, dist|
+                        STDOUT.puts(curr)
 			if (curr != $hostname)
 				$dist_table[curr] = 10000 #might need to come up with better system
 			end
