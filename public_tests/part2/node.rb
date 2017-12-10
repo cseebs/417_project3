@@ -93,7 +93,7 @@ end
 
 def edgeu(cmd)
 	dst = cmd[0]
-	cost = cmd[1]
+	cost = cmd[1].to_i
 	curr_path = $routing_table[dst]
 	next_dst = curr_path[2]
 	$routing_table[dst] = [$hostname, dst, next_dst, cost]
@@ -106,9 +106,9 @@ def status()
   	$neighbors.sort!
   	$neighbors.each_with_index do | value, index |
     	if index == $neighbors.length - 1
-     	 STDOUT.puts " #{value}\n"
+     	 STDOUT.puts "#{value}\n"
    	 	else
-      	STDOUT.puts " #{value},"
+      	STDOUT.puts "#{value},"
   		end
 	end
 end

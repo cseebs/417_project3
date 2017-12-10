@@ -5,12 +5,14 @@ module Ctrl
 	#receives the message from the client
 	def Ctrl.receive(client)
 		message = client.gets
+          STDOUT.puts(Message.new(message.chop).getPayload())
 		client.flush
 		if (message.length >= Message::HEADER_LENGTH + 1)
 			$sync.synchronize {
 				msg = Message.new(message.chop)
 				seq = msg.getField("frag_seq")
 				num = msg.getField("frag_num")
+
 				if (seq == 0) 
 					Ctrl.handle(msg, client)
 				else 
@@ -108,6 +110,7 @@ module Ctrl
 	end
 
 	def Ctrl.sendMsg(msg, client)
+          STDOUT.puts "Sent: #{msg.getPayload()}"
 		list = msg.fragment()
 		list.each do |packet|
 			client.puts msg.toString()
