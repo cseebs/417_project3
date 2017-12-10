@@ -22,6 +22,9 @@ $hop_table = Hash.new()
 $write_buffers = Hash.new()
 $flood = false
 $neighbors = []
+$flood_packets = Hash.new()
+$socketSem = Mutex.new
+
 
 
 
@@ -38,7 +41,9 @@ def edgeb(cmd)
 		$routing_table[dst] = [$hostname, dst, dst, 1]
 		$dist_table[dst] = 1
 		$hop_table[dst] = dst
-		$socketToNode[sock] = dst
+		$socketSem.synchronize {
+			$socketToNode[sock] = dst
+		}
 		msg = Message.new
 		msg.setField("type", 0)
 		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
@@ -67,9 +72,11 @@ def shutdown(cmd)
   if $server != nil
     $server.close
   end
-  $socketToNode.keys.each { |sock|
-  	sock.flush
-    sock.close
+  $socketSem.synchronize {
+ 	 $socketToNode.keys.each { |sock|
+  		sock.flush
+    	sock.close
+  	}
   }
   STDOUT.flush
   STDERR.flush
@@ -83,17 +90,19 @@ end
 def edged(cmd)
 	dst = cmd[0]
 	$routing_table.delete(dst)
-	$dist_table[dst] = "INF"
+	$dist_table.delete(dst)
 	$neighbors.delete(dst)
 	$hop_table.delete(dst)
 	sock = $socketToNode.key(dst)
 	sock.close()
-	$socketToNode.delete(sock)
+	$socketSem.synchronize {
+		$socketToNode.delete(sock)
+	}
 end
 
 def edgeu(cmd)
 	dst = cmd[0]
-	cost = cmd[1]
+	cost = cmd[1].to_i
 	curr_path = $routing_table[dst]
 	next_dst = curr_path[2]
 	$routing_table[dst] = [$hostname, dst, next_dst, cost]
@@ -106,9 +115,9 @@ def status()
   	$neighbors.sort!
   	$neighbors.each_with_index do | value, index |
     	if index == $neighbors.length - 1
-     	 STDOUT.puts " #{value}\n"
+     	 STDOUT.puts "#{value}\n"
    	 	else
-      	STDOUT.puts " #{value},"
+      	STDOUT.puts "#{value},"
   		end
 	end
 end
@@ -169,7 +178,7 @@ def setup(hostname, port, nodes, config)
 	$port = port
 	$curr_time = Time.now
 	$flood_timer = 0
-        flood_interval = 0.5
+        flood_interval = 0.1
         $update_timer = 0
 	Thread.new {
 		loop {
@@ -191,9 +200,11 @@ def setup(hostname, port, nodes, config)
         
         Thread.new {
            loop {
-              if ($update_timer >= flood_interval)
+              if ($update_timer >= $update_interval)
                  $update_timer = 0
+                $sync.synchronize {
                  Ctrl.dijkstra()
+                }
               end
            }
         }
@@ -231,7 +242,9 @@ def setup(hostname, port, nodes, config)
 	Thread.new {
 		loop {
 			client = server.accept 
-			$socketToNode[client] = nil
+			$socketSem.synchronize {
+				$socketToNode[client] = nil
+			}
 		}
 	}
 
@@ -244,6 +257,19 @@ def setup(hostname, port, nodes, config)
 					Ctrl.receive(sock)
 				end
 			end
+		}
+	}
+
+	Thread.new {
+		loop {
+			$flood_packets.each do |soc, msg|
+				$socketToNode.each do |sock, node|
+					if (sock != soc)
+						Ctrl.sendMsg(msg, sock)
+					end
+				end
+			end
+			$flood_packets.clear	
 		}
 	}
 	
