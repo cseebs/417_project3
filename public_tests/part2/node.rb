@@ -169,7 +169,7 @@ def setup(hostname, port, nodes, config)
 	$port = port
 	$curr_time = Time.now
 	$flood_timer = 0
-        flood_interval = 0.5
+        flood_interval = 0.1
         $update_timer = 0
 	Thread.new {
 		loop {

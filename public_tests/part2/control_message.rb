@@ -66,8 +66,8 @@ module Ctrl
 		msg.setField("type", 1)
 		$seq_num = $seq_num + 1
 		message = $hostname + "\t"
-		if ($neighbors_dist.length > 0)
-			$neighbors_dist.each do |key, value|
+		if ($dist_table.length > 0)
+			$dist_table.each do |key, value|
 				dist = value
 				message += key + "," + dist.to_s + "\t"
 			end
@@ -82,6 +82,7 @@ module Ctrl
 		num = msg.getField("seq_num")
 		payload_list = msg.getPayload.split("\t")
 		curr_node = payload_list[0]
+          STDOUT.puts(msg.getPayload())
 
 		if (curr_node != $hostname && ($flood_table[curr_node] == nil or 
 			num > $flood_table[curr_node]["seq_num"]))
