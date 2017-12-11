@@ -2,26 +2,29 @@ require 'socket'
 
 $port = nil
 $hostname = nil
-$port_table = Hash.new()
-$socketToNode = Hash.new()
+$port_table = {}
+$socketToNode = {}
 $socketSem = Mutex.new
-$neighbors = Hash.new()
+$neighbors = {}
 $neighborsSem = Mutex.new
-$socToBuffers = Hash.new()
-$read_buffers = Hash.new()
-$write_buffers = Hash.new()
+$socToBuffers = {}
+$read_buffers = {}
+$write_buffers = {}
 $readSem = Mutex.new	
 $writeSem = Mutex.new
 $clock_val = nil
-$flood_table = Hash.new()
+$flood_table = {}
 $neighbor = []
 $seq_num = 0
-$dist_table = Hash.new()
-$new_table = Hash.new()
+$dist_table = {}
+$new_table = {}
 $flood_packets = {}
 $floodSem = Mutex.new
 $flood = false
 $update = false
+$message_buffer = []
+$trace_route = {}
+LINKSTATE_INTERVAL = 5
 
 # --------------------- Part 0 --------------------- # 
 
@@ -39,9 +42,16 @@ def edgeb(cmd)
 		$dist_table[dst] = [dst, 1]
 		$new_table[dst] = [dst, 1]
 		$neighbor.push(dst)
-		$writeSem.synchronize {
-			$write_buffers[sock] = ["0,#{$hostname},\000", 1]
-		}
+		if ($write_buffers.has_key?(sock))
+			while ($write_buffers[sock][1] != 0) do
+			end
+			$write_buffers[sock][1] = 1
+			$write_buffers[sock][0] = "0,#{$hostname},\000"
+		else
+			$writeSem.synchronize {
+				$write_buffers[sock] = ["0,#{$hostname},\000", 1]
+			}
+		end
 		$socketSem.synchronize {
 			$socketToNode[sock] = dst;
 		}
@@ -124,11 +134,25 @@ def sendmsg(cmd)
 end
 
 def ping(cmd)
-	STDOUT.puts "PING: not implemented"
+	dst = cmd[0]
+	num = cmd[1].to_i
+	delay = cmd[2].to_i
+
+	for index in 0..num-1
+		start = $clock_val
+		$message_buffer.push([start, "3"])
+		receive(nil, "3,#{start},#{dst},#{$hostname},#{index},0")
+		sleep(delay)
+	end
 end
 
 def traceroute(cmd)
-	STDOUT.puts "TRACEROUTE: not implemented"
+	dst = cmd[0]
+	start = $clock_val
+	num = 0
+	$message_buffer.push([start, "4"])
+	$trace_route[dst] = []
+	receive(nil, "4,#{start},#{dst},#{$hostname},#{num},0")
 end
 
 # --------------------- Part 4 --------------------- #
@@ -154,9 +178,8 @@ def receive(sock, msg)
 		$dist_table[dst] = [dst, 1]
 		$new_table[dst] = [dst, 1]
 		$neighbor.push(dst)
-	end
 
-	if (type == 1)	
+	elsif (type == 1)	
 		num = cmd[1].to_i()
 		curr_node = cmd[2]
 		
@@ -165,14 +188,15 @@ def receive(sock, msg)
 			$floodSem.synchronize {
 				$flood_packets[sock] = msg
 			}
-			payload_list = msg.chomp.split("\t")
-	
+
+
+			info = msg.chomp.split("\t")
 			if ($new_table.has_key?(curr_node))
-				int_cost = $new_table[curr_node][1]	
+				int_cost = $new_table[curr_node][1].to_i
 				next_hop = $new_table[curr_node][0]	
-				for index in 1..(payload_list.length - 1)
-					if (!payload_list[index].include?("\000"))	
-						neighbor = payload_list[index].chomp.split(",")
+				info.each_with_index do |entry, i|
+					if (i != 0 && !entry.include?("\000"))	
+						neighbor = entry.chomp.split(",")
 						next_dst = neighbor[0]
 						next_cost = neighbor[1].to_i
 						if (next_dst != $hostname)	
@@ -184,6 +208,155 @@ def receive(sock, msg)
 								$new_table[next_dst] = [next_hop, next_cost + int_cost]	
 							end
 						end
+					end
+				end
+			end
+		end
+	elsif (type == 3)
+		start_time = cmd[1].to_i
+		dst = cmd[2]
+		source = cmd[3]
+		num = cmd[4]
+		direction = cmd[5].to_i
+
+		if (dst == $hostname)
+			if (direction == 1)
+				time = $clock_val
+				difference = time - start_time
+
+				if (difference <= $timeout)
+					$message_buffer.delete([start_time, "3"])
+					STDOUT.puts("#{num} #{source} #{difference}")
+				end
+			else
+				receive(nil, "3,#{start_time},#{source},#{dst},#{num},1")
+			end
+		else
+			hop = $dist_table[dst][0]
+			sock = $socketToNode.key(hop)
+			if (sock)
+				if ($write_buffers.has_key?(sock))
+					while ($write_buffers[sock][1] != 0) do
+					end
+					$write_buffers[sock][1] = 1
+					$write_buffers[sock][0] = "#{msg},\000"
+				else
+					$writeSem.synchronize {
+						$write_buffers[sock] = ["0,#{$msg},\000", 1]
+					}
+				end
+			else
+				STDOUT.puts("table not up to date")
+			end
+		end
+	elsif (type == 4)
+		start_time = cmd[1].to_i
+		dst = cmd[2]
+		source = cmd[3]
+		num = cmd[4].to_i
+		direction = cmd[5].to_i
+
+		curr_time = $clock_val
+		rcv_time = curr_time - start_time
+		if (rcv_time <= $timeout.to_i)
+			if (dst == $hostname)
+				hop = $dist_table[source][0]
+				sock = $socketToNode.key(hop)
+				if (sock)
+					if ($write_buffers.has_key?(sock))
+						while ($write_buffers[sock][1] != 0) do
+						end
+						$write_buffers[sock][1] = 1
+						$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000"
+					else
+						$writeSem.synchronize {
+							$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000", 1]
+						}
+					end
+				else
+					STDOUT.puts("table not up to date")
+				end
+			elsif (source == $hostname)
+				if (direction == 0)
+					$trace_route[dst].push([num, $hostname, 0])
+					hop = $dist_table[dst][0]
+					sock = $socketToNode.key(hop)
+					if (sock)
+						if ($write_buffers.has_key?(sock))
+							while ($write_buffers[sock][1] != 0) do
+							end
+							$write_buffers[sock][1] = 1
+							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num+1},0,\000"
+						else
+							$writeSem.synchronize {
+								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num+1},0,\000", 1]
+							}
+						end
+					else
+						STDOUT.puts("table not up to date")
+					end
+				else 
+					rcv_time = cmd[6]
+					node = cmd[7]
+					$trace_route[dst].push([num, node, rcv_time])
+					if (dst == node || num == 10)
+						$message_buffer.delete([start_time, "4"])
+						$trace_route[dst].each do |node|
+							STDOUT.puts "#{node[0]} #{node[1]} #{node[2]}"
+						end
+						$trace_route.delete(dst)
+					end
+				end
+			else
+				if (direction == 1 || num == 10)
+					hop = $dist_table[source][0]
+					sock = $socketToNode.key(hop)
+					if (sock)
+						if ($write_buffers.has_key?(sock))
+							while ($write_buffers[sock][1] != 0) do
+							end
+							$write_buffers[sock][1] = 1
+							$write_buffers[sock][0] = "#{msg},\000"
+						else
+							$writeSem.synchronize {
+								$write_buffers[sock] = ["#{msg},\000", 1]
+							}
+						end
+					else
+						STDOUT.puts("table not up to date")
+					end
+				else
+					hop = $dist_table[source][0]
+					sock = $socketToNode.key(hop)
+					if (sock)
+						if ($write_buffers.has_key?(sock))
+							while ($write_buffers[sock][1] != 0) do
+							end
+							$write_buffers[sock][1] = 1
+							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000"
+						else
+							$writeSem.synchronize {
+								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000", 1]
+							}
+						end
+					else
+						STDOUT.puts("table not up to date")
+					end
+					hop = $dist_table[dst][0]
+					sock = $socketToNode.key(hop)
+					if (sock)
+						if ($write_buffers.has_key?(sock))
+							while ($write_buffers[sock][1] != 0) do
+							end
+							$write_buffers[sock][1] = 1
+							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num+1},0,\000"
+						else
+							$writeSem.synchronize {
+								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num+1},0,\000", 1]
+							}
+						end
+					else
+						STDOUT.puts("table not up to date")
 					end
 				end
 			end
@@ -263,19 +436,6 @@ def setup(hostname, port, nodes, config)
 	      }
 	  }
 	}
-
-	Thread.new {	
-		 loop {
-			    sleep 1
-			    $clock_val = $clock_val + 1
-			    if ($clock_val % $update_interval.to_i() == 0)
-					$flood = true
-				end
-				if ($clock_val % $update_interval.to_i() == 0)
-					$update = true
-				end
-		  }
-	}
 	
 	Thread.new {
 		loop{
@@ -322,7 +482,7 @@ def setup(hostname, port, nodes, config)
 			$writeSem.synchronize {
 				$write_buffers.each do |k, v|
 					if (v[1] == 1)
-						k.puts(v[0])
+						k.send(v[0], 0)
 						v[0] = ""
 						v[1] = 0
 					end
@@ -334,7 +494,7 @@ def setup(hostname, port, nodes, config)
 					$socketSem.synchronize {
 						$socketToNode.each do |sock, node|
 							if (sock != soc)
-								sock.puts(msg)
+								sock.send(msg, 0)
 							end
 						end
 					}
@@ -346,7 +506,7 @@ def setup(hostname, port, nodes, config)
 				$update = false
 		
 				$dist_table = $new_table
-				$new_table = Hash.new()
+				$new_table = {}
 				$neighborsSem.synchronize {
 					$neighbors.each do |n, c|
 						$new_table[n] = [n, c]
@@ -367,12 +527,25 @@ def setup(hostname, port, nodes, config)
 					
 				$socketSem.synchronize {
 					$socketToNode.each do |sock, node|
-						sock.puts(msg)
+						sock.send(msg, 0)
 
 					end
 				}
 			end
 		}
+	}
+
+	Thread.new {	
+		 loop {
+			sleep 1
+			$clock_val = $clock_val + 1
+			if ($clock_val % $update_interval.to_i() == 0)
+				$flood = true
+			end
+			if ($clock_val % LINKSTATE_INTERVAL == 0)
+				$update = true
+			end
+		  }
 	}
 	
 	main()
