@@ -39,16 +39,9 @@ def edgeb(cmd)
 		$dist_table[dst] = [dst, 1]
 		$new_table[dst] = [dst, 1]
 		$neighbor.push(dst)
-		if ($write_buffers.has_key?(sock))
-			while ($write_buffers[socket][1] != 0) do
-			end
-			$write_buffers[sock][1] = 1
-			$write_buffers[sock][0] = "0,#{$hostname},\000"	
-		else
-			$writeSem.synchronize {
-				$write_buffers[sock] = ["0,#{$hostname},\000", 1]
-			}
-		end
+		$writeSem.synchronize {
+			$write_buffers[sock] = ["0,#{$hostname},\000", 1]
+		}
 		$socketSem.synchronize {
 			$socketToNode[sock] = dst;
 		}
