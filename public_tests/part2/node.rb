@@ -15,7 +15,7 @@ $timeout = nil
 $curr_seq = nil
 $flood_table = Hash.new()
 $buffer = []
-$seq_num = 1
+$seq_num = 0
 $neighbors_dist = Hash.new()
 $dist_table = Hash.new()
 $hop_table = Hash.new()
@@ -38,13 +38,16 @@ def edgeb(cmd)
 		$routing_table[dst] = [$hostname, dst, dst, 1]
 		$dist_table[dst] = 1
 		$hop_table[dst] = dst
+          $sync.synchronize {
 		$socketToNode[sock] = dst
+    }
 		msg = Message.new
 		msg.setField("type", 0)
 		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
 		Ctrl.sendMsg(msg, sock)
 		$neighbors_dist[dst] = 1
 		$neighbors.push(dst)
+                $seq_num += 1
 	end
 end
 
@@ -88,7 +91,10 @@ def edged(cmd)
 	$hop_table.delete(dst)
 	sock = $socketToNode.key(dst)
 	sock.close()
+  $sync.synchronize {
 	$socketToNode.delete(sock)
+  }
+        $seq_num += 1
 end
 
 def edgeu(cmd)
@@ -99,6 +105,7 @@ def edgeu(cmd)
 	$routing_table[dst] = [$hostname, dst, next_dst, cost]
 	$dist_table[dst] = cost
 	$neighbors_dist[dst] = cost
+        $seq_num += 1
 end
 
 def status()
@@ -169,8 +176,13 @@ def setup(hostname, port, nodes, config)
 	$port = port
 	$curr_time = Time.now
 	$flood_timer = 0
-        flood_interval = 0.1
+        flood_interval = 0.05
         $update_timer = 0
+
+  $flood_table[$hostname] = {"seq_num" => $seq_num, "neighbors" => $dist_table}
+
+        Thread.abort_on_exception = true
+
 	Thread.new {
 		loop {
 			$curr_time += 0.01
@@ -233,8 +245,10 @@ def setup(hostname, port, nodes, config)
 	Thread.new {
 		loop {
 			client = server.accept 
-			$socketToNode[client] = nil
-		}
+      $sync.synchronize {
+        $socketToNode[client] = nil
+      }	
+                 }
 	}
 
 	Thread.new {
@@ -248,37 +262,6 @@ def setup(hostname, port, nodes, config)
 			end
 		}
 	}
-	
-#	Thread.new {
-#		loop {
-#			$write_buffers.each do |key, value|
-#				if (value != "")
-#					key.puts(value.toString())
-#					$write_buffers[key] = ""
-#				end
-#			end
-#
-#			if ($flood == true)
-#				STDOUT.puts("here")
-#				$flood = false
-#				msg = Message.new
-#				msg.setField("seq_num", $seq_num)
-#				msg.setField("type", 1)
-#				$seq_num = $seq_num + 1
-#				message = $hostname + "\t"
-#				if ($neighbors.length > 0)
-#					$neighbors.each do |key, value|
-#						dist = value
-#						message += key + "," + dist.to_s + "\t"
-#					end
-#					msg.setPayload(message)
-#					$socketToNode.each do |key, value|
-#						key.puts(msg.toString())
-#					end
-#				end
-#			end
-#		}
-#	}
 
 	main()
 

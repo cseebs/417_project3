@@ -5,9 +5,9 @@ module Ctrl
 	#receives the message from the client
 	def Ctrl.receive(client)
 		message = client.gets
-          STDOUT.puts(Message.new(message.chop).getPayload())
+          #STDOUT.puts(Message.new(message.chop).getPayload())
 		client.flush
-		if (message.length >= Message::HEADER_LENGTH + 1)
+		if (message != nil && message.length >= Message::HEADER_LENGTH + 1)
 			$sync.synchronize {
 				msg = Message.new(message.chop)
 				seq = msg.getField("frag_seq")
@@ -57,6 +57,7 @@ module Ctrl
                   $neighbors_dist[dst] = 1
                   $hop_table[dst] = dst
                   $neighbors.push(dst)
+                  $seq_num += 1
                 end 
 	end
 
@@ -64,10 +65,9 @@ module Ctrl
 		msg = Message.new
 		msg.setField("seq_num", $seq_num)
 		msg.setField("type", 1)
-		$seq_num = $seq_num + 1
 		message = $hostname + "\t"
-		if ($dist_table.length > 0)
-			$dist_table.each do |key, value|
+		if ($neighbors_dist.length > 0)
+			$neighbors_dist.each do |key, value|
 				dist = value
 				message += key + "," + dist.to_s + "\t"
 			end
@@ -82,36 +82,33 @@ module Ctrl
 		num = msg.getField("seq_num")
 		payload_list = msg.getPayload.split("\t")
 		curr_node = payload_list[0]
-          STDOUT.puts(msg.getPayload())
+          STDOUT.puts "seq: #{num}\n#{msg.getPayload()}"
 
 		if (curr_node != $hostname && ($flood_table[curr_node] == nil or 
-			num > $flood_table[curr_node]["seq_num"]))
+                                               num > $flood_table[curr_node]["seq_num"]))
 
 			#STDOUT.puts(curr_node)
-			dist_table = Hash.new()
+                        dist_table = Hash.new()
 			for index in 1..(payload_list.length - 1)
 				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
-                          if ((neighbor[0] != $hostname) && (($dist_table[neighbor[0]] == nil) || ($dist_table[curr_node] + neighbor[1].to_i < $dist_table[neighbor[0]])))
+                          if ((neighbor[0] != $hostname) && ($dist_table[neighbor[0]] == nil))
                             $dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
                             $hop_table[neighbor[0]] = curr_node
                           end
-			#	if (neighbor[0] == $hostname)
-			#		$dist_table[curr_node] = neighbor[1].to_i
-			#		$hop_table[curr_node] = curr_node
-			#	else 
-			#		$dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
-			#		$hop_table[neighbor[0]] = curr_node
-			#	end
 			end
-
-			$flood_table[curr_node] = {"seq_num" => num, 
-				"neighbors" => dist_table}
-		end
+                        
+                  $socketToNode.each { |sock, dst|
+                      Ctrl.sendMsg(msg, sock)
+                  }              
+              
+                  $flood_table[curr_node] = {"seq_num" => num, 
+                                             "neighbors" => dist_table}
+		end 
 	end
 
 	def Ctrl.sendMsg(msg, client)
-          STDOUT.puts "Sent: #{msg.getPayload()}"
+          #STDOUT.puts "Sent: #{msg.getPayload()}"
 		list = msg.fragment()
 		list.each do |packet|
 			client.puts msg.toString()
@@ -124,7 +121,7 @@ module Ctrl
                 temp_table = Hash.new()
                 temp_table[$hostname] = 0
                 temp_hop = Hash.new()
-		$dist_table.keys.each do |curr|
+		$flood_table.keys.each do |curr|
 			if (curr != $hostname)
 				temp_table[curr] = 10000 #might need to come up with better system
 			end
@@ -151,10 +148,12 @@ module Ctrl
 		end
           $dist_table = temp_table
           $hop_table = temp_hop
+          $dist_table.delete($hostname)
+          $hop_table.delete($hostname)
 	end
 
 	def Ctrl.minDist(visited, temp_table)
-		min = "INF"
+		min = 1000000
 		min_node = nil
 		temp_table.each do |curr, dist|
 			if (dist < min && !(visited.include? curr))
