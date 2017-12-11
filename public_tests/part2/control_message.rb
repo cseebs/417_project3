@@ -87,12 +87,12 @@ module Ctrl
 		if (curr_node != $hostname && ($flood_table[curr_node] == nil or 
                                                num > $flood_table[curr_node]["seq_num"]))
 
-			#STDOUT.puts(curr_node)
+			STDOUT.puts(curr_node)
                         dist_table = Hash.new()
 			for index in 1..(payload_list.length - 1)
 				neighbor = payload_list[index].split(",") 
 				dist_table[neighbor[0]] = neighbor[1].to_i
-                          if ((neighbor[0] != $hostname) && ($dist_table[neighbor[0]] == nil))
+                          if ((neighbor[0] != $hostname) && $dist_table[neighbor[0]] == nil)
                             $dist_table[neighbor[0]] = neighbor[1].to_i + $dist_table[curr_node]
                             $hop_table[neighbor[0]] = curr_node
                           end
@@ -121,7 +121,7 @@ module Ctrl
                 temp_table = Hash.new()
                 temp_table[$hostname] = 0
                 temp_hop = Hash.new()
-		$flood_table.keys.each do |curr|
+		$dist_table.keys.each do |curr|
 			if (curr != $hostname)
 				temp_table[curr] = 10000 #might need to come up with better system
 			end
@@ -132,9 +132,10 @@ module Ctrl
 		while visited.length < $flood_table.length
 			curr = Ctrl.minDist(visited, temp_table)
 			visited << curr
-			dist_to_curr = temp_table[curr]
-			neighbors = $flood_table[curr]["neighbors"]
-			neighbors.each do |neighbor, dist|
+                        if ($flood_table[curr] != nil)
+                          dist_to_curr = temp_table[curr]
+                          neighbors = $flood_table[curr]["neighbors"]
+                          neighbors.each do |neighbor, dist|
 				new_dist = dist_to_curr + dist
 				if (new_dist < temp_table[neighbor])
 					temp_table[neighbor] = new_dist
@@ -144,7 +145,8 @@ module Ctrl
 						temp_hop[neighbor] = neighbor
 					end
 				end
-			end
+			  end
+                        end
 		end
           $dist_table = temp_table
           $hop_table = temp_hop
