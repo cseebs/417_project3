@@ -1,55 +1,57 @@
 require 'socket'
-require 'thread'
-require_relative 'message'
-require_relative 'control_message'
 
 $port = nil
 $hostname = nil
-$routing_table = Hash.new() 
-$sync = Mutex.new
 $port_table = Hash.new()
-$curr_time = nil
-$update_interval = nil
-$mtu = nil
-$timeout = nil
-$curr_seq = nil
-$flood_table = Hash.new()
-$buffer = []
-$seq_num = 1
-$neighbors_dist = Hash.new()
-$dist_table = Hash.new()
-$hop_table = Hash.new()
-$write_buffers = Hash.new()
-$flood = false
-$neighbors = []
-$flood_packets = Hash.new()
+$socketToNode = Hash.new()
 $socketSem = Mutex.new
+$neighbors = Hash.new()
+$neighborsSem = Mutex.new
+$socToBuffers = Hash.new()
+$read_buffers = Hash.new()
+$write_buffers = Hash.new()
+$readSem = Mutex.new	
+$writeSem = Mutex.new
+$clock_val = nil
+$flood_table = Hash.new()
+$neighbor = []
+$seq_num = 0
+$dist_table = Hash.new()
+$new_table = Hash.new()
+$flood_packets = {}
+$floodSem = Mutex.new
+$flood = false
+$update = false
 
-
-
-
-
-# --------------------- Part 1 --------------------- # 
+# --------------------- Part 0 --------------------- # 
 
 def edgeb(cmd)
-	src_ip = cmd[0]
-	dst_ip = cmd[1]
 	dst = cmd[2]
+	dst_ip = cmd[1]
+	src_ip = cmd[0]
 	port = $port_table[dst]
+	
 	sock = TCPSocket.open(dst_ip, port)
 	if sock != nil
-		$routing_table[dst] = [$hostname, dst, dst, 1]
-		$dist_table[dst] = 1
-		$hop_table[dst] = dst
-		$socketSem.synchronize {
-			$socketToNode[sock] = dst
+		$neighborsSem.synchronize {
+			$neighbors[dst] = 1;
 		}
-		msg = Message.new
-		msg.setField("type", 0)
-		msg.setPayload(dst_ip + "," + src_ip + "," + $hostname)
-		Ctrl.sendMsg(msg, sock)
-		$neighbors_dist[dst] = 1
-		$neighbors.push(dst)
+		$dist_table[dst] = [dst, 1]
+		$new_table[dst] = [dst, 1]
+		$neighbor.push(dst)
+		if ($write_buffers.has_key?(sock))
+			while ($write_buffers[socket][1] != 0) do
+			end
+			$write_buffers[sock][1] = 1
+			$write_buffers[sock][0] = "0,#{$hostname},\000"	
+		else
+			$writeSem.synchronize {
+				$write_buffers[sock] = ["0,#{$hostname},\000", 1]
+			}
+		end
+		$socketSem.synchronize {
+			$socketToNode[sock] = dst;
+		}
 	end
 end
 
@@ -63,9 +65,9 @@ def dumptable(cmd)
 		new_file = File.new(file_name)
 		file = File.open(file_name)
 	end
-	$dist_table.each {|key, value| 
-		file.write("#{$hostname},#{key},#{$hop_table[key]},#{value}\n")}
-	file.close
+	Hash[$dist_table.sort_by { |key, val| key} ].each do |n, v|	
+		file.write("#{$hostname},#{n},#{v[0]},#{v[1]}\n")
+	end
 end
 
 def shutdown(cmd)
@@ -83,47 +85,47 @@ def shutdown(cmd)
   exit(0)
 end
 
-
-#add a table that keeps track of every node you have received a flooded
-#packet from and the highest seq number from that node
-# --------------------- Part 2 --------------------- # 
+# --------------------- Part 1 --------------------- # 
 def edged(cmd)
-	dst = cmd[0]
-	$routing_table.delete(dst)
+	dst = cmd[0];
+	$neighborsSem.synchronize {
+		$neighbors.delete(dst)
+	}
 	$dist_table.delete(dst)
-	$neighbors.delete(dst)
-	$hop_table.delete(dst)
-	sock = $socketToNode.key(dst)
-	sock.close()
+	$new_table.delete(dst)
+	sock = 	$socketToNode.key(dst)
+	sock.close
 	$socketSem.synchronize {
 		$socketToNode.delete(sock)
 	}
 end
 
 def edgeu(cmd)
+	cost = cmd[1].to_i()
 	dst = cmd[0]
-	cost = cmd[1].to_i
-	curr_path = $routing_table[dst]
-	next_dst = curr_path[2]
-	$routing_table[dst] = [$hostname, dst, next_dst, cost]
-	$dist_table[dst] = cost
-	$neighbors_dist[dst] = cost
+	$neighborsSem.synchronize {
+		$neighbors[dst] = cost
+	}
+	$dist_table[dst] = [dst, cost]
+	$new_table[dst] = [dst, cost]
 end
 
 def status()
-  	STDOUT.puts "Name: #{$hostname}\nPort: #{$port}\nNeighbors: "
-  	$neighbors.sort!
-  	$neighbors.each_with_index do | value, index |
-    	if index == $neighbors.length - 1
-     	 STDOUT.puts "#{value}\n"
+	STDOUT.puts "Name: #{$hostname}\nPort: #{$port}\nNeighbors: "
+  	$neighbor.sort!
+  	output = ""
+  	$neighbor.each_with_index do | value, index |
+    	if index == $neighbor.length - 1
+     	 	output +=  "#{value}"
    	 	else
-      	STDOUT.puts "#{value},"
+     		output += "#{value},"
   		end
 	end
+	STDOUT.puts(output)
 end
 
 
-# --------------------- Part 3 --------------------- # 
+# --------------------- Part 2 --------------------- #
 def sendmsg(cmd)
 	STDOUT.puts "SENDMSG: not implemented"
 end
@@ -136,9 +138,8 @@ def traceroute(cmd)
 	STDOUT.puts "TRACEROUTE: not implemented"
 end
 
-# --------------------- Part 4 --------------------- # 
-
-
+# --------------------- Part 4 --------------------- #
+#Dont have to implement? not in the spec:
 def ftp(cmd)
 	STDOUT.puts "FTP: not implemented"
 end
@@ -147,9 +148,66 @@ def circuit(cmd)
 	STDOUT.puts "CIRCUIT: not implemented"
 end
 
+def receive(sock, msg) 
+	cmd = msg.chomp.split(",");
+	type = cmd[0].to_i   
+	
+	if (type == 0)
+		dst = cmd[1]
+		$socketToNode[sock] = dst 
+		$neighborsSem.synchronize {
+			$neighbors[dst] = 1;
+		}
+		$dist_table[dst] = [dst, 1]
+		$new_table[dst] = [dst, 1]
+		$neighbor.push(dst)
+	end
+
+	if (type == 1)	
+		num = cmd[1].to_i()
+		curr_node = cmd[2]
+		
+		if($flood_table[curr_node] == nil || num > $flood_table[curr_node]) 
+			$flood_table[curr_node] = num
+			$floodSem.synchronize {
+				$flood_packets[sock] = msg
+			}
+			payload_list = msg.chomp.split("\t")
+	
+			if ($new_table.has_key?(curr_node))
+				int_cost = $new_table[curr_node][1]	
+				next_hop = $new_table[curr_node][0]	
+				for index in 1..(payload_list.length - 1)
+					if (!payload_list[index].include?("\000"))	
+						neighbor = payload_list[index].chomp.split(",")
+						next_dst = neighbor[0]
+						next_cost = neighbor[1].to_i
+						if (next_dst != $hostname)	
+							if ($new_table.has_key?(next_dst))	
+								if (int_cost + next_cost < $new_table[next_dst][1])	
+									$new_table[next_dst] = [next_hop, next_cost + int_cost]
+								end
+							else
+								$new_table[next_dst] = [next_hop, next_cost + int_cost]	
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	
+	if(sock)
+		$read_buffers[sock][1] = 0
+		$read_buffers[sock][0] = ""
+	end
+end
+
+
+
+
 # do main loop here.... 
 def main()
-
 	while(line = STDIN.gets())
 		line = line.strip()
 		arr = line.split(' ')
@@ -176,51 +234,7 @@ end
 def setup(hostname, port, nodes, config)
 	$hostname = hostname
 	$port = port
-	$curr_time = Time.now
-	$flood_timer = 0
-        flood_interval = 0.1
-        $update_timer = 0
-	Thread.new {
-		loop {
-			$curr_time += 0.01
-			$flood_timer +=0.01
-                        $update_timer += 0.01
-			if ($flood_timer >= flood_interval)
-				$flood_timer = 0
-				$flood = true 
-				Thread.new {
-					$sync.synchronize {
-						Ctrl.flood()	
-					}
-				}
-			end
-			sleep(0.01)
-		}
-	}
-        
-        Thread.new {
-           loop {
-              if ($update_timer >= $update_interval)
-                 $update_timer = 0
-                $sync.synchronize {
-                 Ctrl.dijkstra()
-                }
-              end
-           }
-        }
-	#set up ports, server, buffers
-	
-	$socketToNode = {} #Hashmap to index socket by node
-
-	f = File.open(nodes, "r")
-	f.each_line do |line|
-		line = line.strip()
-		msg = line.split(',')
-		node = msg[0]
-		p = msg[1]
-		$port_table[node] = p
-	end
-	f.close
+	$clock_val = Time.now().to_i()
 
 	f = File.open(config, "r")
 	f.each_line do |line|
@@ -236,74 +250,138 @@ def setup(hostname, port, nodes, config)
 	end
 	f.close
 
-
-	#start a thread for accepting messages sent to this server
+	f = File.open(nodes, "r")
+	f.each_line do |line|
+		line = line.strip()
+		msg = line.split(',')
+		node = msg[0]
+		p = msg[1]
+		$port_table[node] = p
+	end
+	f.close
+	
 	server = TCPServer.open(port)
 	Thread.new {
-		loop {
-			client = server.accept 
-			$socketSem.synchronize {
-				$socketToNode[client] = nil
-			}
-		}
+	  loop {                                      
+	     client = server.accept
+	      
+	      $socketSem.synchronize {
+	    	$socketToNode[client] = nil            
+	      }
+	  }
 	}
 
-	Thread.new {
-		loop {
-			read = IO.select($socketToNode.keys,nil,nil,1)
-
-			if(read)
-				read[0].each do |sock|
-					Ctrl.receive(sock)
+	Thread.new {	
+		 loop {
+			    sleep 1
+			    $clock_val = $clock_val + 1
+			    if ($clock_val % $update_interval.to_i() == 0)
+					$flood = true
 				end
-			end
-		}
+				if ($clock_val % $update_interval.to_i() == 0)
+					$update = true
+				end
+		  }
 	}
-
+	
 	Thread.new {
-		loop {
-			$flood_packets.each do |soc, msg|
-				$socketToNode.each do |sock, node|
-					if (sock != soc)
-						Ctrl.sendMsg(msg, sock)
+		loop{
+			read = []
+				
+			read = IO.select($socketToNode.keys,nil,nil,1)
+				
+			if(read)   
+				socks = read[0]
+					
+				socks.each do |sock|
+					if (!($read_buffers.has_key?(sock)))
+						$readSem.synchronize {
+							$read_buffers[sock] = ["", 0]
+						}
+					end
+							
+					if (!($write_buffers.has_key?(sock)))
+						$writeSem.synchronize {
+							$write_buffers[sock] = ["", 0]
+						}
+					end
+						
+					if ($read_buffers[sock][1] == 0)
+						$read_buffers[sock][1] = 2	
+						buffer = sock.gets("\0")          
+						sock.flush
+							
+						if(buffer && buffer.length > 2) 
+							$read_buffers[sock][0] = buffer;
+							$read_buffers[sock][1] = 1;
+							receive(sock,$read_buffers[sock][0])
+						else
+							$read_buffers[sock][1] = 0
+						end
 					end
 				end
 			end
-			$flood_packets.clear	
+		}	
+	}
+	
+	Thread.new {	
+		loop {
+			$writeSem.synchronize {
+				$write_buffers.each do |k, v|
+					if (v[1] == 1)
+						k.puts(v[0])
+						v[0] = ""
+						v[1] = 0
+					end
+				end
+			}
+				
+			$floodSem.synchronize {
+				$flood_packets.each do |soc, msg|
+					$socketSem.synchronize {
+						$socketToNode.each do |sock, node|
+							if (sock != soc)
+								sock.puts(msg)
+							end
+						end
+					}
+				end
+				$flood_packets.clear	
+			}
+				
+			if ($update == true)
+				$update = false
+		
+				$dist_table = $new_table
+				$new_table = Hash.new()
+				$neighborsSem.synchronize {
+					$neighbors.each do |n, c|
+						$new_table[n] = [n, c]
+					end
+				}
+			end
+				
+			if ($flood == true)
+				$flood = false
+				$seq_num += 1
+				msg = "1,#{$seq_num},#{$hostname},\t"
+				$socketSem.synchronize {
+					$socketToNode.each do |sock, node|
+						msg << "#{node},#{$neighbors[node]}\t"	
+					end
+				}
+				msg << "\000"
+					
+				$socketSem.synchronize {
+					$socketToNode.each do |sock, node|
+						sock.puts(msg)
+
+					end
+				}
+			end
 		}
 	}
 	
-#	Thread.new {
-#		loop {
-#			$write_buffers.each do |key, value|
-#				if (value != "")
-#					key.puts(value.toString())
-#					$write_buffers[key] = ""
-#				end
-#			end
-#
-#			if ($flood == true)
-#				STDOUT.puts("here")
-#				$flood = false
-#				msg = Message.new
-#				msg.setField("seq_num", $seq_num)
-#				msg.setField("type", 1)
-#				$seq_num = $seq_num + 1
-#				message = $hostname + "\t"
-#				if ($neighbors.length > 0)
-#					$neighbors.each do |key, value|
-#						dist = value
-#						message += key + "," + dist.to_s + "\t"
-#					end
-#					msg.setPayload(message)
-#					$socketToNode.each do |key, value|
-#						key.puts(msg.toString())
-#					end
-#				end
-#			end
-#		}
-#	}
-
 	main()
 
 end
