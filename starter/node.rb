@@ -24,7 +24,7 @@ $flood = false
 $update = false
 $message_buffer = []
 $trace_route = {}
-LINKSTATE_INTERVAL = 5
+$msg_frags = {}
 
 # --------------------- Part 0 --------------------- # 
 
@@ -130,7 +130,36 @@ end
 
 # --------------------- Part 2 --------------------- #
 def sendmsg(cmd)
-	STDOUT.puts "SENDMSG: not implemented"
+	dst = cmd[0]
+	start_time = $clock_val.to_i
+	
+	msgSize = cmd[1..-1].join(" ").bytesize
+	if(msgSize > $mtu) 
+		fragsNeeded = (msgSize/($maxPayload.to_f)).ceil 
+		entiremsg = cmd[1..-1].join(" ")
+			
+		for f in 0..fragsNeeded-1
+			if(f == fragsNeeded-1)
+				frag = entiremsg.byteslice((f*$mtu), $mtu)
+				msg = "2,#{dst},#{start_time},0,#{$hostname},"
+				msg << "#{fragsNeeded},#{f+1},"
+				msg << frag
+				route(dest,msg)
+			else
+				frag = entiremsg.byteslice((f*$mtu), $mtu)
+				msg = "2,#{dst},#{start_time},0,#{$hostname},"
+				msg << "#{fragsNeeded},#{f+1},"
+				msg << frag
+				route(dest,msg)
+			end
+		end
+	else
+		msg = "2,#{dst},#{start_time},0,#{$hostname},0,0,"
+		msg << cmd[1..-1].join(" ")
+		route(dst,msg)
+	end
+	
+	$message_buffer.push([start_time,"2"])
 end
 
 def ping(cmd)
@@ -149,10 +178,11 @@ end
 def traceroute(cmd)
 	dst = cmd[0]
 	start = $clock_val
-	num = 0
-	$message_buffer.push([start, "4"])
+	$message_buffer.push([start, "4", dst])
 	$trace_route[dst] = []
-	receive(nil, "4,#{start},#{dst},#{$hostname},#{num},0")
+	msg = "4,#{start},#{dst},#{$hostname},1,0"
+	$trace_route[dst].push([0,$hostname,0])
+	route(dst, msg)
 end
 
 # --------------------- Part 4 --------------------- #
@@ -212,6 +242,42 @@ def receive(sock, msg)
 				end
 			end
 		end
+	elsif (type == 2)
+		dst = cmd[1]
+		start_time = cmd[2].to_i()
+		direction = cmd[3]
+		source = cmd[4]
+		num_frags = cmd[5].to_i() 
+		frag_num = cmd[6].to_i() 
+		message = cmd[7]
+		if(dst == $hostname) 
+			if(direction == "0")
+				if(num_frags> 0) 
+					if(frag_num == num_frags) 
+						$msg_frags[start_time] << message
+						receive(nil, "2,#{source},#{start_time},1,#{dst}")
+						STDOUT.puts "SENDMSG: #{source} --> #{$msg_frags[start_time]}"	
+						$msg_frags.delete(start_time)
+					elsif(frag_num == 1) 
+						$msg_frags[start_time] = message
+					else 
+						$msg_frags[start_time] << message
+					end
+				else
+					receive(nil, "2,#{source},#{start_time},1,#{dst}") 
+					STDOUT.puts "SENDMSG: #{source} --> #{message}"	
+				end
+						  
+			else 
+				time = $clock_val
+				rtt = time - start_time
+				if(rtt <= $timeout.to_i()) 
+					$message_buffer.delete([start_time,"2"])   
+				end 
+			end
+		else 
+			route(dst, msg)
+		end
 	elsif (type == 3)
 		start_time = cmd[1].to_i
 		dst = cmd[2]
@@ -232,22 +298,7 @@ def receive(sock, msg)
 				receive(nil, "3,#{start_time},#{source},#{dst},#{num},1")
 			end
 		else
-			hop = $dist_table[dst][0]
-			sock = $socketToNode.key(hop)
-			if (sock)
-				if ($write_buffers.has_key?(sock))
-					while ($write_buffers[sock][1] != 0) do
-					end
-					$write_buffers[sock][1] = 1
-					$write_buffers[sock][0] = "#{msg},\000"
-				else
-					$writeSem.synchronize {
-						$write_buffers[sock] = ["0,#{$msg},\000", 1]
-					}
-				end
-			else
-				STDOUT.puts("table not up to date")
-			end
+			route(dst, msg)
 		end
 	elsif (type == 4)
 		start_time = cmd[1].to_i
@@ -255,109 +306,36 @@ def receive(sock, msg)
 		source = cmd[3]
 		num = cmd[4].to_i
 		direction = cmd[5].to_i
-
+			
 		curr_time = $clock_val
-		rcv_time = curr_time - start_time
-		if (rcv_time <= $timeout.to_i)
-			if (dst == $hostname)
-				hop = $dist_table[source][0]
-				sock = $socketToNode.key(hop)
-				if (sock)
-					if ($write_buffers.has_key?(sock))
-						while ($write_buffers[sock][1] != 0) do
-						end
-						$write_buffers[sock][1] = 1
-						$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000"
-					else
-						$writeSem.synchronize {
-							$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000", 1]
-						}
+		if(curr_time - start_time <= $timeout.to_i()) 
+			if($hostname == dst) 
+				time = $clock_val
+				newMsg = "4,#{start_time},#{dst},#{source},#{num},1,#{time},#{$hostname}"
+				route(source, newMsg)
+			elsif($hostname == source) 
+				node = cmd[7]
+				time = cmd[6]
+				rt = curr_time - time.to_i()
+				$trace_route[dst].push([num, node,rt])
+					
+				if(dst == node || num == 10) 
+					$message_buffer.delete([start_time, "4", dst]) 
+					$trace_route[dst].each do |line|
+						STDOUT.puts "#{line[0]} #{line[1]} #{line[2]}"
 					end
-				else
-					STDOUT.puts("table not up to date")
+					$trace_route.delete(dst) 
 				end
-			elsif (source == $hostname)
-				if (direction == 0)
-					$trace_route[dst].push([num, $hostname, 0])
-					hop = $dist_table[dst][0]
-					sock = $socketToNode.key(hop)
-					if (sock)
-						if ($write_buffers.has_key?(sock))
-							while ($write_buffers[sock][1] != 0) do
-							end
-							$write_buffers[sock][1] = 1
-							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num+1},0,\000"
-						else
-							$writeSem.synchronize {
-								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num+1},0,\000", 1]
-							}
-						end
-					else
-						STDOUT.puts("table not up to date")
-					end
+			else 
+				if(direction == 1 || num == 10) 
+					route(source, msg)
 				else 
-					rcv_time = cmd[6]
-					node = cmd[7]
-					$trace_route[dst].push([num, node, rcv_time])
-					if (dst == node || num == 10)
-						$message_buffer.delete([start_time, "4"])
-						$trace_route[dst].each do |node|
-							STDOUT.puts "#{node[0]} #{node[1]} #{node[2]}"
-						end
-						$trace_route.delete(dst)
-					end
-				end
-			else
-				if (direction == 1 || num == 10)
-					hop = $dist_table[source][0]
-					sock = $socketToNode.key(hop)
-					if (sock)
-						if ($write_buffers.has_key?(sock))
-							while ($write_buffers[sock][1] != 0) do
-							end
-							$write_buffers[sock][1] = 1
-							$write_buffers[sock][0] = "#{msg},\000"
-						else
-							$writeSem.synchronize {
-								$write_buffers[sock] = ["#{msg},\000", 1]
-							}
-						end
-					else
-						STDOUT.puts("table not up to date")
-					end
-				else
-					hop = $dist_table[source][0]
-					sock = $socketToNode.key(hop)
-					if (sock)
-						if ($write_buffers.has_key?(sock))
-							while ($write_buffers[sock][1] != 0) do
-							end
-							$write_buffers[sock][1] = 1
-							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000"
-						else
-							$writeSem.synchronize {
-								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num},1,#{rcv_time},#{$hostname},\000", 1]
-							}
-						end
-					else
-						STDOUT.puts("table not up to date")
-					end
-					hop = $dist_table[dst][0]
-					sock = $socketToNode.key(hop)
-					if (sock)
-						if ($write_buffers.has_key?(sock))
-							while ($write_buffers[sock][1] != 0) do
-							end
-							$write_buffers[sock][1] = 1
-							$write_buffers[sock][0] = "4,#{start_time},#{dst},#{source},#{num+1},0,\000"
-						else
-							$writeSem.synchronize {
-								$write_buffers[sock] = ["4,#{start_time},#{dst},#{source},#{num+1},0,\000", 1]
-							}
-						end
-					else
-						STDOUT.puts("table not up to date")
-					end
+					time = $clock_val
+					fwd = "4,#{start_time},#{dst},#{source},#{num+1},0"                    
+					ack = "4,#{start_time},#{dst},#{source},#{num},1,#{time},#{$hostname}" 
+						
+					route(dst, fwd)
+					route(source, ack)
 				end
 			end
 		end
@@ -369,6 +347,23 @@ def receive(sock, msg)
 	end
 end
 
+def route(dst, msg)
+	hop = $dist_table[dst][0]
+	socket = $socketToNode.key(hop)
+	if(socket)
+		if ($write_buffers.has_key?(socket))
+			while ($write_buffers[socket][1] != 0) do
+			end
+			$write_buffers[socket][1] = 2
+			$write_buffers[socket][0] = "#{msg},\000"	
+			$write_buffers[socket][1] = 1
+		else
+			$writeSem.synchronize {
+				$write_buffers[socket] = ["#{msg},\000", 1]
+			}
+		end
+	end 
+end
 
 
 
@@ -532,20 +527,37 @@ def setup(hostname, port, nodes, config)
 					end
 				}
 			end
+
+			if($message_buffer[0])
+					oldestmsg = $message_buffer[0][0] 
+					rtt = $clock_val - oldestmsg
+					if(rtt > $timeout.to_i())                
+						popped = $message_buffer.shift	
+						if(popped[1] == "3")
+							STDOUT.puts "PING ERROR: HOST UNREACHABLE"
+						elsif(popped[1] == "4")
+							dst = popped[0][2]   
+							STDOUT.puts "TIMEOUT ON #{$trace_route[dst].length-1}"
+							$trace_route.delete(dst) 
+						elsif(popped[1] == "2")
+							STDOUT.puts "SENDMSG ERROR: HOST UNREACHABLE"
+						end
+					end
+				end
 		}
 	}
 
 	Thread.new {	
-		 loop {
+		 while true do
 			sleep 1
 			$clock_val = $clock_val + 1
 			if ($clock_val % $update_interval.to_i() == 0)
 				$flood = true
 			end
-			if ($clock_val % LINKSTATE_INTERVAL == 0)
+			if ($clock_val % 2 == 0)
 				$update = true
 			end
-		  }
+		 end
 	}
 	
 	main()
