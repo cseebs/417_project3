@@ -100,9 +100,9 @@ end
 def edgeu(cmd)
 	dst = cmd[0]
 	cost = cmd[1].to_i
-	curr_path = $routing_table[dst]
-	next_dst = curr_path[2]
-	$routing_table[dst] = [$hostname, dst, next_dst, cost]
+	#curr_path = $routing_table[dst]
+	next_dst = $hop_table[dst]
+        $routing_table[dst] = [$hostname, dst, next_dst, cost]
 	$dist_table[dst] = cost
 	$neighbors_dist[dst] = cost
         $seq_num += 1
@@ -245,9 +245,9 @@ def setup(hostname, port, nodes, config)
 	Thread.new {
 		loop {
 			client = server.accept 
-      $sync.synchronize {
+       # $sync.synchronize {
         $socketToNode[client] = nil
-      }	
+      #}	
                  }
 	}
 
