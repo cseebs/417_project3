@@ -25,6 +25,7 @@ $update = false
 $message_buffer = []
 $trace_route = {}
 $msg_frags = {}
+$update_timer = 2
 
 # --------------------- Part 0 --------------------- # 
 
@@ -144,13 +145,13 @@ def sendmsg(cmd)
 				msg = "2,#{dst},#{start_time},0,#{$hostname},"
 				msg << "#{fragsNeeded},#{f+1},"
 				msg << frag
-				route(dest,msg)
+				route(dst,msg)
 			else
 				frag = entiremsg.byteslice((f*$mtu), $mtu)
 				msg = "2,#{dst},#{start_time},0,#{$hostname},"
 				msg << "#{fragsNeeded},#{f+1},"
 				msg << frag
-				route(dest,msg)
+				route(dst,msg)
 			end
 		end
 	else
@@ -554,7 +555,7 @@ def setup(hostname, port, nodes, config)
 			if ($clock_val % $update_interval.to_i() == 0)
 				$flood = true
 			end
-			if ($clock_val % 2 == 0)
+			if ($clock_val % $update_timer == 0)
 				$update = true
 			end
 		 end
